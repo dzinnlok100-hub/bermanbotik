@@ -198,7 +198,7 @@ async def render_all(
             if p is not None
         ]
     elif overwrite:
-        problems = _all_with_solution(db)
+        problems = _all_renderable(db, include_statement_only=include_statement_only)
     else:
         problems = list(db.problems_without_image(include_statement_only=include_statement_only))
 
@@ -244,12 +244,22 @@ async def render_all(
     log.info("Done.")
 
 
-def _all_with_solution(db: Database) -> list[Problem]:
+def _all_renderable(db: Database, include_statement_only: bool = False) -> list[Problem]:
+    """Problems whose card we know how to render at all."""
+    if include_statement_only:
+        where = "has_solution = 1 OR (statement_html IS NOT NULL AND statement_html != '')"
+    else:
+        where = "has_solution = 1"
     cur = db._conn.execute(
-        "SELECT * FROM problems WHERE has_solution = 1 ORDER BY berman_number"
+        f"SELECT * FROM problems WHERE {where} ORDER BY berman_number"
     )
     from .db import _row_to_problem
     return [_row_to_problem(r) for r in cur.fetchall()]
+
+
+# Backwards-compatible alias for older callers / tests.
+def _all_with_solution(db: Database) -> list[Problem]:
+    return _all_renderable(db, include_statement_only=False)
 
 
 async def _render_and_store(

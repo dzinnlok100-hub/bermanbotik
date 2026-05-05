@@ -316,16 +316,31 @@ async def _render_no_solution_card(
         "если знаете её решение.</i>"
     )
 
-    if image_path and image_path.exists():
+    sent = None
+    if problem.telegram_file_id:
+        try:
+            sent = await message.answer_photo(
+                photo=problem.telegram_file_id,
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=markup,
+            )
+        except TelegramBadRequest as e:
+            log.warning(
+                "Cached file_id rejected for statement-only №%d: %s",
+                problem.berman_number,
+                e,
+            )
+
+    if sent is None and image_path and image_path.exists():
         sent = await message.answer_photo(
             photo=FSInputFile(str(image_path)),
             caption=caption,
             parse_mode="HTML",
             reply_markup=markup,
         )
-        if sent and sent.photo:
-            db.update_telegram_file_id(problem.id, sent.photo[-1].file_id)
-    else:
+
+    if sent is None:
         # Fall back to a text card with the raw HTML statement (basic plain text)
         await message.answer(
             caption + "\n\n" + _strip_html(problem.statement_html or ""),
@@ -333,6 +348,10 @@ async def _render_no_solution_card(
             disable_web_page_preview=True,
             reply_markup=markup,
         )
+        return
+
+    if sent.photo:
+        db.update_telegram_file_id(problem.id, sent.photo[-1].file_id)
 
 
 def db_images_dir(db: Database) -> Path:
