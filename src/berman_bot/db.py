@@ -335,14 +335,16 @@ class Database:
         )
         return [(int(r["berman_number"]), int(r["amk_internal_id"])) for r in cur.fetchall()]
 
-    def problems_without_image(self) -> Iterable[Problem]:
+    def problems_without_image(self, include_statement_only: bool = False) -> Iterable[Problem]:
+        if include_statement_only:
+            where = (
+                "(has_solution = 1 OR (statement_html IS NOT NULL AND statement_html != '')) "
+                "AND (image_path IS NULL OR image_path = '')"
+            )
+        else:
+            where = "has_solution = 1 AND (image_path IS NULL OR image_path = '')"
         cur = self._conn.execute(
-            """
-            SELECT * FROM problems
-            WHERE has_solution = 1
-              AND (image_path IS NULL OR image_path = '')
-            ORDER BY berman_number
-            """
+            f"SELECT * FROM problems WHERE {where} ORDER BY berman_number"
         )
         return (_row_to_problem(r) for r in cur.fetchall())
 

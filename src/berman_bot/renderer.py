@@ -184,6 +184,7 @@ async def render_all(
     only_berman: list[int] | None = None,
     overwrite: bool = False,
     concurrency: int = 1,
+    include_statement_only: bool = False,
 ) -> None:
     settings = get_settings()
     db = Database(settings.db_path)
@@ -196,8 +197,10 @@ async def render_all(
             for p in (db.get_problem_by_berman_number(n) for n in only_berman)
             if p is not None
         ]
+    elif overwrite:
+        problems = _all_renderable(db, include_statement_only=include_statement_only)
     else:
-        problems = list(db.problems_without_image()) if not overwrite else _all_with_solution(db)
+        problems = list(db.problems_without_image(include_statement_only=include_statement_only))
 
     log.info("Rendering %d problem(s)", len(problems))
     if not problems:
@@ -241,12 +244,22 @@ async def render_all(
     log.info("Done.")
 
 
-def _all_with_solution(db: Database) -> list[Problem]:
+def _all_renderable(db: Database, include_statement_only: bool = False) -> list[Problem]:
+    """Problems whose card we know how to render at all."""
+    if include_statement_only:
+        where = "has_solution = 1 OR (statement_html IS NOT NULL AND statement_html != '')"
+    else:
+        where = "has_solution = 1"
     cur = db._conn.execute(
-        "SELECT * FROM problems WHERE has_solution = 1 ORDER BY berman_number"
+        f"SELECT * FROM problems WHERE {where} ORDER BY berman_number"
     )
     from .db import _row_to_problem
     return [_row_to_problem(r) for r in cur.fetchall()]
+
+
+# Backwards-compatible alias for older callers / tests.
+def _all_with_solution(db: Database) -> list[Problem]:
+    return _all_renderable(db, include_statement_only=False)
 
 
 async def _render_and_store(
@@ -284,6 +297,12 @@ def cli() -> None:
         default=1,
         help="Number of concurrent renders (each opens a Chromium tab).",
     )
+    parser.add_argument(
+        "--include-statement-only",
+        action="store_true",
+        help="Also render problems that only have a statement (no solution) "
+        "so the bot can show the problem text without on-the-fly rendering.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -297,6 +316,7 @@ def cli() -> None:
             only_berman=args.berman,
             overwrite=args.overwrite,
             concurrency=args.concurrency,
+            include_statement_only=args.include_statement_only,
         )
     )
 

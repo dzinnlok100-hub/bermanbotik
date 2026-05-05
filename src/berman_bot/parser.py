@@ -255,17 +255,21 @@ async def run_scrape(
     chapters_filter: set[int] | None = None,
     paragraphs_only: bool = False,
     statements_only: bool = False,
+    concurrency: int = 3,
+    request_delay: float = 0.3,
 ) -> None:
     settings = get_settings()
     db = Database(settings.db_path)
     timeout = aiohttp.ClientTimeout(total=60)
     headers = {"User-Agent": "berman-bot/0.1 (+https://github.com/dzinnlok100-hub/bermanbotik)"}
-    connector = aiohttp.TCPConnector(limit=10)
+    connector = aiohttp.TCPConnector(limit=concurrency)
     async with aiohttp.ClientSession(timeout=timeout, headers=headers, connector=connector) as s:
         scraper = Scraper(
             base_url=settings.source_base_url,
             book_id=settings.source_book_id,
             session=s,
+            concurrency=concurrency,
+            request_delay=request_delay,
         )
 
         log.info("Fetching chapter list…")
@@ -324,7 +328,7 @@ async def run_scrape(
                 return
             db.update_problem_html(berman_number, stmt, sol, ans)
 
-        chunk = 50
+        chunk = 30
         for i in range(0, len(rows), chunk):
             batch = rows[i : i + chunk]
             await asyncio.gather(*(fetch_one(b, a) for b, a in batch))
@@ -350,6 +354,18 @@ def cli() -> None:
         action="store_true",
         help="Skip fetching problem detail (statement/solution/answer).",
     )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=3,
+        help="Max in-flight HTTP requests (default 3, keep low to avoid getting rate-limited).",
+    )
+    parser.add_argument(
+        "--request-delay",
+        type=float,
+        default=0.3,
+        help="Sleep between requests (seconds, default 0.3) to stay polite to amkbook.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -364,6 +380,8 @@ def cli() -> None:
             chapters_filter=chapters_filter,
             paragraphs_only=args.paragraphs_only,
             statements_only=args.statements_only,
+            concurrency=args.concurrency,
+            request_delay=args.request_delay,
         )
     )
 
