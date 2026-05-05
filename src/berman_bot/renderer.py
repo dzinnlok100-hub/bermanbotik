@@ -184,6 +184,7 @@ async def render_all(
     only_berman: list[int] | None = None,
     overwrite: bool = False,
     concurrency: int = 1,
+    include_statement_only: bool = False,
 ) -> None:
     settings = get_settings()
     db = Database(settings.db_path)
@@ -196,8 +197,10 @@ async def render_all(
             for p in (db.get_problem_by_berman_number(n) for n in only_berman)
             if p is not None
         ]
+    elif overwrite:
+        problems = _all_with_solution(db)
     else:
-        problems = list(db.problems_without_image()) if not overwrite else _all_with_solution(db)
+        problems = list(db.problems_without_image(include_statement_only=include_statement_only))
 
     log.info("Rendering %d problem(s)", len(problems))
     if not problems:
@@ -284,6 +287,12 @@ def cli() -> None:
         default=1,
         help="Number of concurrent renders (each opens a Chromium tab).",
     )
+    parser.add_argument(
+        "--include-statement-only",
+        action="store_true",
+        help="Also render problems that only have a statement (no solution) "
+        "so the bot can show the problem text without on-the-fly rendering.",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -297,6 +306,7 @@ def cli() -> None:
             only_berman=args.berman,
             overwrite=args.overwrite,
             concurrency=args.concurrency,
+            include_statement_only=args.include_statement_only,
         )
     )
 

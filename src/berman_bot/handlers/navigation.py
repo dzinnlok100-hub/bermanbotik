@@ -220,10 +220,15 @@ async def _send_problem(
     )
 
     if not problem.has_solution:
+        # If we have a statement (from PDF or amkbook), render it as a card too
+        # so the user at least sees the problem text. Otherwise just say "no solution".
+        if problem.statement_html:
+            await _render_no_solution_card(message, db, problem, breadcrumb, markup)
+            return
         text = (
             f"<b>Задача №{problem.berman_number}</b>\n"
             f"{breadcrumb}\n"
-            "Решение этой задачи пока не добавлено в базу. "
+            "Условие и решение этой задачи пока не добавлены в базу. "
             "Если вы знаете решение — напишите автору бота, мы добавим его."
         )
         await message.answer(text, parse_mode="HTML", disable_web_page_preview=True, reply_markup=markup)
@@ -269,3 +274,75 @@ async def _send_problem(
     if sent and sent.photo:
         # Cache file_id so subsequent sends avoid re-uploading the file.
         db.update_telegram_file_id(problem.id, sent.photo[-1].file_id)
+
+
+async def _render_no_solution_card(
+    message: Message,
+    db: Database,
+    problem: Problem,
+    breadcrumb: str,
+    markup,
+) -> None:
+    """Show the (statement-only) card for a problem we have a statement but no solution for."""
+    from .. import renderer as r
+
+    image_path = Path(problem.image_path) if problem.image_path else None
+    if image_path is None or not image_path.exists():
+        # Render and store on disk
+        try:
+            from playwright.async_api import async_playwright
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch()
+                try:
+                    context = await browser.new_context(
+                        viewport={"width": 960, "height": 800},
+                        device_scale_factor=2,
+                    )
+                    page = await context.new_page()
+                    out = await r._render_one(page, problem, db_images_dir(db))
+                    await context.close()
+                finally:
+                    await browser.close()
+            db.update_image_path(problem.id, str(out))
+            image_path = out
+        except Exception as e:
+            log.warning("On-demand render for №%d failed: %s", problem.berman_number, e)
+            image_path = None
+
+    caption = (
+        f"<b>Задача №{problem.berman_number}</b>"
+        + (f"\n<i>{breadcrumb.strip()}</i>" if breadcrumb else "")
+        + "\n⚠️ <i>Решения пока нет в базе. Пришлите номер задачи администратору, "
+        "если знаете её решение.</i>"
+    )
+
+    if image_path and image_path.exists():
+        sent = await message.answer_photo(
+            photo=FSInputFile(str(image_path)),
+            caption=caption,
+            parse_mode="HTML",
+            reply_markup=markup,
+        )
+        if sent and sent.photo:
+            db.update_telegram_file_id(problem.id, sent.photo[-1].file_id)
+    else:
+        # Fall back to a text card with the raw HTML statement (basic plain text)
+        await message.answer(
+            caption + "\n\n" + _strip_html(problem.statement_html or ""),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+            reply_markup=markup,
+        )
+
+
+def db_images_dir(db: Database) -> Path:
+    from ..config import get_settings
+    return get_settings().images_dir
+
+
+def _strip_html(html: str) -> str:
+    """Naively strip HTML tags for plain-text fallback."""
+    import re
+    text = re.sub(r"<[^>]+>", "", html)
+    text = re.sub(r"\s+\n", "\n", text).strip()
+    return text[:1500]
