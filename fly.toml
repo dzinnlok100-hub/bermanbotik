@@ -1,0 +1,21 @@
+app = "berman-bot"
+primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  DB_PATH = "/app/data/bot.db"
+  IMAGES_DIR = "/app/data/images"
+
+[mounts]
+  source = "berman_data"
+  destination = "/app/data"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512
+
+[deploy]
+  strategy = "immediate"
